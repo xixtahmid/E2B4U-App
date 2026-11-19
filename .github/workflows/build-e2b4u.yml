@@ -93,7 +93,7 @@ jobs:
                   applicationId "com.tahmid.e2b4u"
                   minSdk 21
                   targetSdk 34
-                  versionCode 1
+                  versionCode 2
                   versionName "3.6"
               }
 
@@ -157,6 +157,8 @@ jobs:
           package com.tahmid.e2b4u;
 
           import android.annotation.SuppressLint;
+          import android.content.ClipData;
+          import android.content.ClipboardManager;
           import android.content.Context;
           import android.content.Intent;
           import android.net.ConnectivityManager;
@@ -180,6 +182,8 @@ jobs:
           import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
           import com.google.android.gms.common.api.ApiException;
           import com.google.android.gms.tasks.Task;
+          import java.util.concurrent.CountDownLatch;
+          import java.util.concurrent.TimeUnit;
 
           public class MainActivity extends AppCompatActivity {
 
@@ -267,6 +271,46 @@ jobs:
                   @JavascriptInterface
                   public void signOut() {
                       runOnUiThread(() -> googleSignInClient.signOut());
+                  }
+
+                  @JavascriptInterface
+                  public String getClipboardText() {
+                      final String[] result = {""};
+                      final CountDownLatch latch = new CountDownLatch(1);
+                      runOnUiThread(() -> {
+                          try {
+                              ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                              if (cm != null && cm.hasPrimaryClip()) {
+                                  ClipData clip = cm.getPrimaryClip();
+                                  if (clip != null && clip.getItemCount() > 0) {
+                                      CharSequence text = clip.getItemAt(0).coerceToText(MainActivity.this);
+                                      if (text != null) {
+                                          result[0] = text.toString();
+                                      }
+                                  }
+                              }
+                          } catch (Exception ignored) {
+                          } finally {
+                              latch.countDown();
+                          }
+                      });
+                      try {
+                          latch.await(1, TimeUnit.SECONDS);
+                      } catch (InterruptedException ignored) {}
+                      return result[0];
+                  }
+
+                  @JavascriptInterface
+                  public void copyToClipboard(final String text) {
+                      runOnUiThread(() -> {
+                          try {
+                              ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                              if (cm != null && text != null) {
+                                  ClipData clip = ClipData.newPlainText("E2B4U", text);
+                                  cm.setPrimaryClip(clip);
+                              }
+                          } catch (Exception ignored) {}
+                      });
                   }
               }
 
@@ -390,4 +434,3 @@ jobs:
         with:
           name: E2B4U-v3.6
           path: output/
-          
