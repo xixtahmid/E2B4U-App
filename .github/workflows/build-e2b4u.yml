@@ -94,7 +94,7 @@ jobs:
                   applicationId "com.tahmid.e2b4u"
                   minSdk 21
                   targetSdk 34
-                  versionCode 3
+                  versionCode 4
                   versionName "4.0"
               }
 
@@ -132,6 +132,12 @@ jobs:
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.TTS_SERVICE" />
+                  </intent>
+              </queries>
+
               <application
                   android:allowBackup="true"
                   android:icon="@mipmap/ic_launcher"
@@ -166,6 +172,7 @@ jobs:
           import android.net.NetworkInfo;
           import android.net.Uri;
           import android.os.Bundle;
+          import android.speech.tts.TextToSpeech;
           import android.view.ViewGroup;
           import android.webkit.CookieManager;
           import android.webkit.JavascriptInterface;
@@ -183,6 +190,7 @@ jobs:
           import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
           import com.google.android.gms.common.api.ApiException;
           import com.google.android.gms.tasks.Task;
+          import java.util.Locale;
           import java.util.concurrent.CountDownLatch;
           import java.util.concurrent.TimeUnit;
 
@@ -191,6 +199,10 @@ jobs:
               private WebView mainWebView;
               private GoogleSignInClient googleSignInClient;
               private ValueCallback<Uri[]> filePathCallback;
+              private TextToSpeech textToSpeech;
+              private boolean ttsReady = false;
+              private String pendingTtsText = null;
+              private float pendingTtsRate = 1.0f;
 
               private static final int FILE_CHOOSER_CODE = 1001;
               private static final int RC_GOOGLE_SIGN_IN = 9001;
@@ -201,6 +213,8 @@ jobs:
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
+
+                  initTextToSpeech();
 
                   GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                           .requestIdToken(WEB_CLIENT_ID)
@@ -313,6 +327,63 @@ jobs:
                           } catch (Exception ignored) {}
                       });
                   }
+
+                  @JavascriptInterface
+                  public void speakText(final String text, final float rate) {
+                      if (text == null || text.trim().isEmpty()) return;
+                      final float safeRate = Math.max(0.4f, Math.min(2.0f, rate <= 0f ? 1.0f : rate));
+                      runOnUiThread(() -> {
+                          try {
+                              if (textToSpeech == null) {
+                                  pendingTtsText = text.trim();
+                                  pendingTtsRate = safeRate;
+                                  initTextToSpeech();
+                                  return;
+                              }
+                              if (ttsReady) {
+                                  textToSpeech.setSpeechRate(safeRate);
+                                  textToSpeech.speak(text.trim(), TextToSpeech.QUEUE_FLUSH, null, "e2b4u_tts");
+                              } else {
+                                  pendingTtsText = text.trim();
+                                  pendingTtsRate = safeRate;
+                              }
+                          } catch (Exception ignored) {}
+                      });
+                  }
+
+                  @JavascriptInterface
+                  public void stopSpeaking() {
+                      runOnUiThread(() -> {
+                          try {
+                              pendingTtsText = null;
+                              if (textToSpeech != null) {
+                                  textToSpeech.stop();
+                              }
+                          } catch (Exception ignored) {}
+                      });
+                  }
+              }
+
+              private void initTextToSpeech() {
+                  try {
+                      ttsReady = false;
+                      textToSpeech = new TextToSpeech(getApplicationContext(), status -> {
+                          if (status == TextToSpeech.SUCCESS && textToSpeech != null) {
+                              int res = textToSpeech.setLanguage(Locale.US);
+                              if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                                  textToSpeech.setLanguage(Locale.ENGLISH);
+                              }
+                              ttsReady = true;
+                              if (pendingTtsText != null && !pendingTtsText.isEmpty()) {
+                                  String toSpeak = pendingTtsText;
+                                  float rateToUse = pendingTtsRate;
+                                  pendingTtsText = null;
+                                  textToSpeech.setSpeechRate(rateToUse);
+                                  textToSpeech.speak(toSpeak, TextToSpeech.QUEUE_FLUSH, null, "e2b4u_tts");
+                              }
+                          }
+                      });
+                  } catch (Exception ignored) {}
               }
 
               @SuppressLint("SetJavaScriptEnabled")
@@ -382,6 +453,18 @@ jobs:
                   } else {
                       super.onBackPressed();
                   }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (textToSpeech != null) {
+                      try {
+                          textToSpeech.stop();
+                          textToSpeech.shutdown();
+                      } catch (Exception ignored) {}
+                      textToSpeech = null;
+                  }
+                  super.onDestroy();
               }
           }
           EOF
